@@ -461,12 +461,12 @@ static int32_t cam_csiphy_update_secure_info(
 
 	switch (csiphy_dev->hw_version) {
 	case CSIPHY_VERSION_V201:
-	case CSIPHY_VERSION_V123:
 	case CSIPHY_VERSION_V125:
 		phy_mask_len =
 		CAM_CSIPHY_MAX_DPHY_LANES + CAM_CSIPHY_MAX_CPHY_LANES + 1;
 		break;
 	case CSIPHY_VERSION_V121:
+	case CSIPHY_VERSION_V123:
 	case CSIPHY_VERSION_V124:
 	case CSIPHY_VERSION_V210:
 	case CSIPHY_VERSION_V211:
@@ -608,41 +608,6 @@ static int cam_csiphy_sanitize_lane_cnt(
 	return 0;
 }
 
-static int cam_csiphy_sanitize_datarate(
-	struct csiphy_device *csiphy_dev,
-	uint64_t required_phy_data_rate)
-{
-	struct data_rate_settings_t *settings_table = NULL;
-
-	if (csiphy_dev->ctrl_reg->data_rates_settings_table == NULL) {
-		CAM_DBG(CAM_CSIPHY,
-			"Data rate specific register table not available");
-		return 0;
-	}
-
-	settings_table = csiphy_dev->ctrl_reg->data_rates_settings_table;
-
-	if ((settings_table->min_supported_datarate != 0) &&
-		(required_phy_data_rate < settings_table->min_supported_datarate)) {
-		CAM_ERR(CAM_CSIPHY,
-			"Required datarate less than min supported value, required:%llu supported min:%llu",
-			required_phy_data_rate,
-			settings_table->min_supported_datarate);
-		return -EINVAL;
-	}
-
-	if ((settings_table->max_supported_datarate != 0) &&
-		(required_phy_data_rate > settings_table->max_supported_datarate)) {
-		CAM_ERR(CAM_CSIPHY,
-			"Required datarate more than max supported value, required:%llu supported max:%llu",
-			required_phy_data_rate,
-			settings_table->max_supported_datarate);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 int32_t cam_cmd_buf_parser(struct csiphy_device *csiphy_dev,
 	struct cam_config_dev_cmd *cfg_dev)
 {
@@ -733,16 +698,6 @@ int32_t cam_cmd_buf_parser(struct csiphy_device *csiphy_dev,
 		return rc;
 	}
 
-	if (csiphy_dev->csiphy_info[index].csiphy_3phase) {
-		rc = cam_csiphy_sanitize_datarate(csiphy_dev,
-			cam_cmd_csiphy_info->data_rate);
-		if (rc) {
-			CAM_ERR(CAM_CSIPHY,
-				"Wrong Datarate Configuration: %llu",
-				cam_cmd_csiphy_info->data_rate);
-			return rc;
-		}
-	}
 
 	preamble_en = (cam_cmd_csiphy_info->mipi_flags &
 		PREAMBLE_PATTEN_CAL_MASK);
@@ -942,6 +897,9 @@ static int cam_csiphy_cphy_data_rate_config(
 	uint32_t reg_addr = 0, reg_data = 0, reg_param_type = 0;
 	uint8_t  skew_cal_enable = 0;
 	int32_t  delay = 0;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	uint64_t supported_min_phy_bw = 0;
+#endif
 
 	if ((csiphy_device == NULL) || (csiphy_device->ctrl_reg == NULL)) {
 		CAM_ERR(CAM_CSIPHY, "Device is NULL");
@@ -949,7 +907,7 @@ static int cam_csiphy_cphy_data_rate_config(
 	}
 
 	if (csiphy_device->ctrl_reg->data_rates_settings_table == NULL) {
-		CAM_DBG(CAM_CSIPHY,
+		CAM_INFO(CAM_CSIPHY,
 			"Data rate specific register table not available");
 		return 0;
 	}
@@ -981,6 +939,13 @@ static int cam_csiphy_cphy_data_rate_config(
 
 		CAM_DBG(CAM_CSIPHY, "table[%d] BW : %llu Selected",
 			data_rate_idx, supported_phy_bw);
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		supported_min_phy_bw = data_rate_idx > 0 ? drate_settings[data_rate_idx-1].bandwidth : 0;
+		/* ((data+_rate GSpS) * (10^9) * (2.28 bits/symbol)) rounded value*/
+		CAM_INFO(CAM_CSIPHY, "The selected setting's mipi data rate is between %llu~%llu MSpS",
+			supported_min_phy_bw/2280000, supported_phy_bw/2280000);
+#endif
+
 		lane_enable = csiphy_device->csiphy_info[idx].lane_enable;
 		lane_assign = csiphy_device->csiphy_info[idx].lane_assign;
 		lane_idx = -1;
@@ -1024,6 +989,7 @@ static int cam_csiphy_cphy_data_rate_config(
 				if (skew_cal_enable)
 					cam_io_w_mb(reg_data, csiphybase + reg_addr);
 				break;
+
 				case CSIPHY_AUXILIARY_SETTING: {
 					uint32_t phy_idx = csiphy_device->soc_info.index;
 
@@ -1040,6 +1006,7 @@ static int cam_csiphy_cphy_data_rate_config(
 					CAM_DBG(CAM_CSIPHY, "Do Nothing");
 				break;
 				}
+
 				if (delay > 0)
 					usleep_range(delay, delay + 5);
 			}

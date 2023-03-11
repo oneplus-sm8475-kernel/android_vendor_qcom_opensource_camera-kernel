@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/ratelimit.h>
@@ -37,7 +36,6 @@ static const char drv_name[] = "tfe_bus";
 	(sizeof(struct cam_tfe_bus_reg_offset_bus_client) / 4)
 #define MAX_REG_VAL_PAIR_SIZE    \
 	(MAX_BUF_UPDATE_REG_NUM * 2 * CAM_PACKET_MAX_PLANES)
-
 
 enum cam_tfe_bus_packer_format {
 	PACKER_FMT_PLAIN_128,
@@ -147,7 +145,7 @@ struct cam_tfe_bus_tfe_out_data {
 	uint32_t                         secure_mode;
 	void                            *priv;
 	cam_hw_mgr_event_cb_func         event_cb;
-	uint32_t                         mid[CAM_TFE_BUS_MAX_MID_PER_PORT];
+	uint32_t                         mid;
 };
 
 struct cam_tfe_bus_priv {
@@ -783,7 +781,7 @@ static int cam_tfe_bus_acquire_wm(
 			break;
 		case CAM_FORMAT_PD10:
 			rsrc_data->pack_fmt = 0x0;
-			rsrc_data->width = DIV_ROUND_UP(rsrc_data->width, 4);
+			rsrc_data->width /= 4;
 			rsrc_data->height /= 2;
 			break;
 		case CAM_FORMAT_NV21:
@@ -814,10 +812,6 @@ static int cam_tfe_bus_acquire_wm(
 		rsrc_data->height = 0;
 		rsrc_data->stride = 1;
 		rsrc_data->en_cfg = (0x1 << 16) | 0x1;
-
-		/*RS state packet format*/
-		if (rsrc_data->index == 15)
-			rsrc_data->pack_fmt = 0x9;
 	} else {
 		CAM_ERR(CAM_ISP, "Invalid WM:%d requested", rsrc_data->index);
 		return -EINVAL;
@@ -1642,7 +1636,6 @@ static int cam_tfe_bus_init_tfe_out_resource(uint32_t  index,
 	struct cam_tfe_bus_tfe_out_data *rsrc_data = NULL;
 	int rc = 0;
 	int32_t tfe_out_id = hw_info->tfe_out_hw_info[index].tfe_out_id;
-	int i;
 
 	if (tfe_out_id < 0 ||
 		tfe_out_id >= CAM_TFE_BUS_TFE_OUT_MAX) {
@@ -1684,9 +1677,7 @@ static int cam_tfe_bus_init_tfe_out_resource(uint32_t  index,
 	rsrc_data->max_height      =
 		hw_info->tfe_out_hw_info[index].max_height;
 	rsrc_data->secure_mode  = CAM_SECURE_MODE_NON_SECURE;
-
-	for (i = 0; i < CAM_TFE_BUS_MAX_MID_PER_PORT; i++)
-		rsrc_data->mid[i] = hw_info->tfe_out_hw_info[index].mid[i];
+	rsrc_data->mid = hw_info->tfe_out_hw_info[index].mid;
 
 	tfe_out->hw_intf = bus_priv->common_data.hw_intf;
 
@@ -2282,7 +2273,7 @@ static int cam_tfe_bus_get_res_id_for_mid(
 	struct cam_isp_hw_get_cmd_update   *cmd_update =
 		(struct cam_isp_hw_get_cmd_update   *)cmd_args;
 	struct cam_isp_hw_get_res_for_mid       *get_res = NULL;
-	int i, j;
+	int i;
 
 	get_res = (struct cam_isp_hw_get_res_for_mid *)cmd_update->data;
 	if (!get_res) {
@@ -2298,10 +2289,8 @@ static int cam_tfe_bus_get_res_id_for_mid(
 		if (!tfe_out_data)
 			continue;
 
-		for (j = 0; j < CAM_TFE_BUS_MAX_MID_PER_PORT; j++) {
-			if (tfe_out_data->mid[j] == get_res->mid)
-				goto end;
-		}
+		if (tfe_out_data->mid == get_res->mid)
+			goto end;
 	}
 
 	if (i == bus_priv->num_out) {

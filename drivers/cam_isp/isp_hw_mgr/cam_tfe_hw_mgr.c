@@ -2643,7 +2643,7 @@ static int cam_tfe_mgr_config_hw(void *hw_mgr_priv,
 	if (cfg->reapply_type && cfg->cdm_reset_before_apply) {
 		if (ctx->last_cdm_done_req < cfg->request_id) {
 			cdm_hang_detect =
-				cam_cdm_detect_hang_error(ctx->cdm_handle);
+				cam_cdm_detect_hang_error(ctx->cdm_handle, CAM_ISP);
 			CAM_ERR_RATE_LIMIT(CAM_ISP,
 				"CDM callback not received for req: %lld, last_cdm_done_req: %lld, cdm_hang_detect: %d",
 				cfg->request_id, ctx->last_cdm_done_req,
@@ -2785,7 +2785,7 @@ static int cam_tfe_mgr_config_hw(void *hw_mgr_priv,
 			msecs_to_jiffies(
 			CAM_TFE_HW_CONFIG_TIMEOUT));
 		if (rc <= 0) {
-			if (!cam_cdm_detect_hang_error(ctx->cdm_handle)) {
+			if (!cam_cdm_detect_hang_error(ctx->cdm_handle, CAM_ISP)) {
 				CAM_ERR(CAM_ISP,
 					"CDM workqueue delay detected, wait for some more time req_id=%llu rc=%d ctx_index %d",
 					cfg->request_id, rc,
@@ -4827,38 +4827,6 @@ outportlog:
 
 }
 
-static void *cam_tfe_mgr_user_dump_stream_info(
-	void *dump_struct, uint8_t *addr_ptr)
-{
-	struct cam_tfe_hw_mgr_ctx    *ctx = NULL;
-	struct cam_isp_hw_mgr_res    *hw_mgr_res = NULL;
-	struct cam_isp_resource_node *hw_res = NULL;
-	int32_t                      *addr;
-	int                           i;
-	int hw_idx[CAM_ISP_HW_SPLIT_MAX] = { -1, -1 };
-
-	ctx = (struct cam_tfe_hw_mgr_ctx *)dump_struct;
-
-	if (!list_empty(&ctx->res_list_tfe_in)) {
-		hw_mgr_res = list_first_entry(&ctx->res_list_tfe_in,
-		struct cam_isp_hw_mgr_res, list);
-
-		for (i = 0; i < CAM_ISP_HW_SPLIT_MAX; i++) {
-			hw_res = hw_mgr_res->hw_res[i];
-			if (hw_res && hw_res->hw_intf)
-				hw_idx[i] = hw_res->hw_intf->hw_idx;
-		}
-	}
-
-	addr = (int32_t *)addr_ptr;
-
-	*addr++ = ctx->is_dual;
-	*addr++ = hw_idx[CAM_ISP_HW_SPLIT_LEFT];
-	*addr++ = hw_idx[CAM_ISP_HW_SPLIT_RIGHT];
-
-	return addr;
-}
-
 static int cam_tfe_mgr_cmd(void *hw_mgr_priv, void *cmd_args)
 {
 	int rc = 0;
@@ -4920,12 +4888,6 @@ static int cam_tfe_mgr_cmd(void *hw_mgr_priv, void *cmd_args)
 		case CAM_ISP_HW_MGR_GET_LAST_CDM_DONE:
 			isp_hw_cmd_args->u.last_cdm_done =
 				ctx->last_cdm_done_req;
-			break;
-		case CAM_ISP_HW_MGR_DUMP_STREAM_INFO:
-			rc = cam_common_user_dump_helper(
-				(void *)(isp_hw_cmd_args->cmd_data),
-				cam_tfe_mgr_user_dump_stream_info, ctx,
-				sizeof(int32_t), "ISP_STREAM_INFO_FROM_TFE_HW_MGR:");
 			break;
 		default:
 			CAM_ERR(CAM_ISP, "Invalid HW mgr command:0x%x",
